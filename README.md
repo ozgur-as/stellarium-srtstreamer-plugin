@@ -27,12 +27,30 @@ Supports hardware encoding (NVENC, VAAPI) and works with any SRT receiver — VL
 
 ## Installation (Windows)
 
-1. Download `stellarium.exe` from the [latest release](https://github.com/ozgur-as/stellarium-srtstreamer-plugin/releases).
-2. Back up your existing `C:\Program Files\Stellarium\stellarium.exe`.
-3. Copy the downloaded `stellarium.exe` into `C:\Program Files\Stellarium\`, replacing the original.
-4. Launch Stellarium. The SRT Streamer plugin is built in and ready to use.
+1. Download all files from the [latest release](https://github.com/ozgur-as/stellarium-srtstreamer-plugin/releases).
+2. Back up your `C:\Program Files\Stellarium\` folder.
+3. Copy all downloaded files into `C:\Program Files\Stellarium\`, replacing the originals.
+4. Launch Stellarium and enable the plugin in Configuration > Plugins > SRT Video Streamer.
+
+> The release includes FFmpeg DLLs with H.264 encoding support (libx264, h264_nvenc) since the default Stellarium FFmpeg DLLs only support decoding.
 
 > **Why a full executable?** Stellarium does not support dynamic plugins on Windows ([stellarium#385](https://github.com/Stellarium/stellarium/issues/385)), so the plugin must be compiled into the binary as a static plugin. The release is built from unmodified Stellarium source with only the SRT Streamer plugin added. All other Stellarium features and plugins work as usual.
+
+### Installation (Linux)
+
+1. Download `stellarium-srtstreamer-linux64.tar.gz` from the [latest release](https://github.com/ozgur-as/stellarium-srtstreamer-plugin/releases).
+2. Extract into your Stellarium modules directory:
+   ```bash
+   tar xzf stellarium-srtstreamer-linux64.tar.gz -C ~/.stellarium/modules/
+   ```
+3. Make sure FFmpeg with H.264 encoding support is installed:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt install libavcodec-extra
+   # Fedora
+   sudo dnf install ffmpeg-libs
+   ```
+4. Launch Stellarium and enable the plugin in Configuration > Plugins > SRT Video Streamer.
 
 ## Usage
 

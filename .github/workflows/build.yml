@@ -1,0 +1,199 @@
+name: Build SRT Streamer Plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  STELLARIUM_VERSION: "v25.4"
+  QT_VERSION: "6.8.3"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Stellarium
+        run: |
+          git clone --depth 1 --branch ${{ env.STELLARIUM_VERSION }} https://github.com/Stellarium/stellarium.git stellarium
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtcharts qtmultimedia qtpositioning qtserialport
+
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          $url = "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-full_build-shared.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath C:\ffmpeg-dl
+          $ffmpegPath = (Get-ChildItem "C:\ffmpeg-dl\ffmpeg-*" -Directory | Select-Object -First 1).FullName
+          echo "FFMPEG_ROOT=$ffmpegPath" >> $env:GITHUB_ENV
+          echo "$ffmpegPath\bin" >> $env:GITHUB_PATH
+          echo "Installed FFmpeg at $ffmpegPath"
+
+      - name: Integrate plugin into Stellarium
+        shell: bash
+        run: |
+          # Copy plugin into Stellarium's plugins directory
+          cp -r plugin stellarium/plugins/SrtStreamer
+
+          # Add ADD_PLUGIN line
+          sed -i '/ADD_PLUGIN(Supernovae 1)/i ADD_PLUGIN(SrtStreamer 1)' stellarium/CMakeLists.txt
+
+          # Add Q_IMPORT_PLUGIN line
+          sed -i '/#ifdef USE_STATIC_PLUGIN_HELLOSTELMODULE/i \
+          #ifdef USE_STATIC_PLUGIN_SRTSTREAMER\
+          Q_IMPORT_PLUGIN(SrtStreamerPluginInterface)\
+          #endif\
+          ' stellarium/src/core/StelApp.cpp
+
+      - name: Configure
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cd stellarium
+          mkdir build
+          cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_PREFIX_PATH="%Qt6_DIR%\.." ^
+            -DFFMPEG_ROOT="%FFMPEG_ROOT%" ^
+            -DUSE_PLUGIN_SRTSTREAMER=1 ^
+            -DENABLE_TESTING=0 ^
+            -DENABLE_NLS=0 ^
+            -DENABLE_GPS=0 ^
+            -DENABLE_LIBGPS=0 ^
+            -DENABLE_MEDIA=0 ^
+            -DENABLE_SCRIPTING=0 ^
+            -DENABLE_SHOWMYSKY=0 ^
+            -DENABLE_XLSX=0
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cd stellarium\build
+          ninja
+
+      - name: Prepare release artifacts
+        shell: bash
+        run: |
+          mkdir -p release
+          cp stellarium/build/src/stellarium.exe release/
+          cp "$FFMPEG_ROOT"/bin/avcodec-*.dll release/
+          cp "$FFMPEG_ROOT"/bin/avformat-*.dll release/
+          cp "$FFMPEG_ROOT"/bin/avutil-*.dll release/
+          cp "$FFMPEG_ROOT"/bin/swscale-*.dll release/
+          cp "$FFMPEG_ROOT"/bin/swresample-*.dll release/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stellarium-srtstreamer-win64
+          path: release/
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Stellarium
+        run: |
+          git clone --depth 1 --branch ${{ env.STELLARIUM_VERSION }} https://github.com/Stellarium/stellarium.git stellarium
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qt6-base-dev \
+            libgl-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            ninja-build
+
+      - name: Build dynamic plugin
+        run: |
+          cd plugin
+          mkdir build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTELROOT=$GITHUB_WORKSPACE/stellarium
+          ninja
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release/SrtStreamer
+          cp plugin/build/src/libSrtStreamer.so release/SrtStreamer/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stellarium-srtstreamer-linux64
+          path: release/
+
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stellarium-srtstreamer-win64
+          path: windows
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stellarium-srtstreamer-linux64
+          path: linux
+
+      - name: Package releases
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cd windows && zip -r ../stellarium-srtstreamer-${VERSION}-win64.zip . && cd ..
+          cd linux && tar czf ../stellarium-srtstreamer-${VERSION}-linux64.tar.gz . && cd ..
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "SRT Streamer Plugin ${{ github.ref_name }}"
+          files: |
+            stellarium-srtstreamer-*-win64.zip
+            stellarium-srtstreamer-*-linux64.tar.gz
+          generate_release_notes: true
+          body: |
+            ## Windows Installation
+
+            1. Back up your `C:\Program Files\Stellarium\` folder
+            2. Extract `stellarium-srtstreamer-win64.zip` into `C:\Program Files\Stellarium\`, replacing the originals
+            3. Launch Stellarium — enable SRT Video Streamer in Configuration > Plugins
+
+            Includes FFmpeg DLLs with H.264 encoding support (libx264, h264_nvenc).
+
+            ## Linux Installation
+
+            Extract `stellarium-srtstreamer-linux64.tar.gz` into `~/.stellarium/modules/`:
+            ```
+            tar xzf stellarium-srtstreamer-linux64.tar.gz -C ~/.stellarium/modules/
+            ```
+
+            Built from Stellarium ${{ env.STELLARIUM_VERSION }} with SRT Streamer plugin.
