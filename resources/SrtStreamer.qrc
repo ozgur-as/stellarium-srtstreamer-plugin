@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/SrtStreamer">
+    <file>bt_srt_on.png</file>
+    <file>bt_srt_off.png</file>
+    <file>srt_logo.png</file>
+  </qresource>
+</RCC>

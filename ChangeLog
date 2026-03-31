@@ -1,0 +1,12 @@
+1.0.0 [2025-03-31]
+Initial release:
+- OpenGL framebuffer capture with PBO double-buffering
+- FFmpeg H.264 encoding (libx264, h264_nvenc, h264_vaapi)
+- SRT output via MPEG-TS (caller and listener modes)
+- Async encoding on a separate thread with double-buffered frame handoff
+- Non-blocking SRT connection with timeout and cancel support
+- Automatic disconnect detection
+- Toolbar button with SRT icon
+- Qt configuration dialog with status indicator
+- Keyboard shortcuts (Ctrl+Shift+S, Ctrl+Shift+R)
+- Builds as static plugin (Windows + Linux) or dynamic plugin (Linux)
