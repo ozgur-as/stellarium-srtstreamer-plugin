@@ -72,19 +72,64 @@ QString SrtEncoder::buildSrtUrl(const Config& cfg) const
 
 bool SrtEncoder::openCodec(const Config& cfg)
 {
-	const AVCodec* codec = avcodec_find_encoder_by_name(cfg.encoder.toUtf8().constData());
-	if (!codec)
+	// --- Step 1: Determine target codec and pixel format ---
+	QString codecName;
+	AVPixelFormat pixFmt;
+
+	if (cfg.use10bit)
 	{
-		// Fallback to libx264 if the requested encoder is not available
-		qWarning() << "[SrtEncoder] Encoder" << cfg.encoder << "not found, falling back to libx264";
-		codec = avcodec_find_encoder_by_name("libx264");
+		// Map H.264 backend choice to 10-bit HEVC equivalent
+		if (cfg.encoder == "h264_nvenc")
+		{
+			codecName = "hevc_nvenc";
+			pixFmt    = AV_PIX_FMT_P010LE;
+		}
+		else if (cfg.encoder == "h264_vaapi")
+		{
+			codecName = "hevc_vaapi";
+			pixFmt    = AV_PIX_FMT_P010LE;
+		}
+		else
+		{
+			codecName = "libx265";
+			pixFmt    = AV_PIX_FMT_YUV420P10LE;
+		}
 	}
+	else
+	{
+		codecName = cfg.encoder;
+		pixFmt    = AV_PIX_FMT_YUV420P;
+	}
+
+	// --- Step 2: Find the encoder, with progressive fallback ---
+	const AVCodec* codec = avcodec_find_encoder_by_name(codecName.toUtf8().constData());
+
+	// 10-bit encoder not available → fall back to 8-bit H.264 variant
+	if (!codec && cfg.use10bit)
+	{
+		qWarning() << "[SrtEncoder] 10-bit encoder" << codecName
+		           << "not found, falling back to 8-bit H.264";
+		codecName = cfg.encoder;
+		pixFmt    = AV_PIX_FMT_YUV420P;
+		codec     = avcodec_find_encoder_by_name(codecName.toUtf8().constData());
+	}
+
+	// Requested encoder not available → fall back to libx264
 	if (!codec)
 	{
-		errorMsg = "No suitable H.264 encoder found";
+		qWarning() << "[SrtEncoder] Encoder" << codecName
+		           << "not found, falling back to libx264";
+		codec  = avcodec_find_encoder_by_name("libx264");
+		pixFmt = AV_PIX_FMT_YUV420P;
+	}
+
+	if (!codec)
+	{
+		errorMsg = "No suitable encoder found";
 		return false;
 	}
 
+	// --- Step 3: Allocate and configure codec context ---
 	codecCtx = avcodec_alloc_context3(codec);
 	if (!codecCtx)
 	{
@@ -96,26 +141,48 @@ bool SrtEncoder::openCodec(const Config& cfg)
 	codecCtx->height    = cfg.height;
 	codecCtx->time_base = AVRational{1, cfg.fps};
 	codecCtx->framerate = AVRational{cfg.fps, 1};
-	codecCtx->pix_fmt   = AV_PIX_FMT_YUV420P;
+	codecCtx->pix_fmt   = pixFmt;
 	codecCtx->bit_rate  = static_cast<int64_t>(cfg.bitrateKbps) * 1000;
 	codecCtx->gop_size  = cfg.fps * 2;  // keyframe every 2 seconds
 	codecCtx->max_b_frames = 0;         // reduce latency
 
-	// Encoder-specific options
-	if (cfg.encoder == "h264_nvenc" && QString(codec->name) == "h264_nvenc")
+	// --- Step 4: Encoder-specific options ---
+	QString name(codec->name);
+	bool is10bit = (pixFmt == AV_PIX_FMT_P010LE || pixFmt == AV_PIX_FMT_YUV420P10LE);
+
+	if (name == "hevc_nvenc")
 	{
-		codecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
 		av_opt_set(codecCtx->priv_data, "preset", "p4", 0);    // balanced quality/speed
 		av_opt_set(codecCtx->priv_data, "tune",   "ll", 0);    // low latency
 		av_opt_set(codecCtx->priv_data, "rc",     "cbr", 0);   // constant bitrate
+		if (is10bit)
+			av_opt_set(codecCtx->priv_data, "profile", "main10", 0);
 	}
-	else if (cfg.encoder == "h264_vaapi" && QString(codec->name) == "h264_vaapi")
+	else if (name == "h264_nvenc")
 	{
-		codecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+		av_opt_set(codecCtx->priv_data, "preset", "p4", 0);
+		av_opt_set(codecCtx->priv_data, "tune",   "ll", 0);
+		av_opt_set(codecCtx->priv_data, "rc",     "cbr", 0);
+	}
+	else if (name == "hevc_vaapi")
+	{
+		if (is10bit)
+			av_opt_set(codecCtx->priv_data, "profile", "main10", 0);
+	}
+	else if (name == "h264_vaapi")
+	{
+		// No additional VAAPI-specific options
+	}
+	else if (name == "libx265")
+	{
+		av_opt_set(codecCtx->priv_data, "preset", "ultrafast", 0);
+		av_opt_set(codecCtx->priv_data, "tune",   "zerolatency", 0);
+		if (is10bit)
+			av_opt_set(codecCtx->priv_data, "profile", "main10", 0);
 	}
 	else
 	{
-		// libx264 or any fallback
+		// libx264 or any other CPU fallback
 		av_opt_set(codecCtx->priv_data, "preset", "ultrafast", 0);
 		av_opt_set(codecCtx->priv_data, "tune",   "zerolatency", 0);
 	}
@@ -123,23 +190,24 @@ bool SrtEncoder::openCodec(const Config& cfg)
 	// Set flags for streaming
 	codecCtx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
+	// --- Step 5: Open the codec, with fallback on failure ---
 	int ret = avcodec_open2(codecCtx, codec, nullptr);
 	if (ret < 0)
 	{
-		// If a hardware encoder fails, fall back to libx264
-		if (cfg.encoder != "libx264")
-		{
-			char errbuf[256];
-			av_strerror(ret, errbuf, sizeof(errbuf));
-			qWarning() << "[SrtEncoder]" << codec->name << "failed:" << errbuf
-			           << "— falling back to libx264";
+		char errbuf[256];
+		av_strerror(ret, errbuf, sizeof(errbuf));
+		qWarning() << "[SrtEncoder]" << codec->name << "failed:" << errbuf;
 
+		// Try falling back to libx264 (8-bit) if we weren't already using it
+		if (name != "libx264")
+		{
+			qWarning() << "[SrtEncoder] Falling back to libx264 (8-bit)";
 			avcodec_free_context(&codecCtx);
 
 			const AVCodec* fallback = avcodec_find_encoder_by_name("libx264");
 			if (!fallback)
 			{
-				errorMsg = "Hardware encoder failed and libx264 not available";
+				errorMsg = "Encoder failed and libx264 not available";
 				return false;
 			}
 
@@ -171,7 +239,9 @@ bool SrtEncoder::openCodec(const Config& cfg)
 		}
 	}
 
-	qDebug() << "[SrtEncoder] Opened codec:" << codec->name
+	const char* depth = (codecCtx->pix_fmt == AV_PIX_FMT_P010LE ||
+	                      codecCtx->pix_fmt == AV_PIX_FMT_YUV420P10LE) ? "10-bit" : "8-bit";
+	qDebug() << "[SrtEncoder] Opened codec:" << codec->name << depth
 	         << cfg.width << "x" << cfg.height << "@" << cfg.fps << "fps"
 	         << cfg.bitrateKbps << "kbps";
 
@@ -274,7 +344,7 @@ bool SrtEncoder::open(const Config& cfg)
 	// Allocate packet
 	pkt = av_packet_alloc();
 
-	// Setup swscale: RGBA → YUV420P (with vertical flip for OpenGL's bottom-up rows)
+	// Setup swscale: RGBA → YUV (with vertical flip for OpenGL's bottom-up rows)
 	swsCtx = sws_getContext(
 		cfg.width, cfg.height, AV_PIX_FMT_RGBA,
 		cfg.width, cfg.height, codecCtx->pix_fmt,
@@ -407,7 +477,7 @@ void SrtEncoder::encoderLoop()
 		int w = buf.width;
 		int h = buf.height;
 
-		// Convert RGBA (bottom-up) → YUV420P
+		// Convert RGBA (bottom-up) → YUV (8-bit or 10-bit depending on codec)
 		// OpenGL gives us bottom-to-top rows. We flip by using a negative
 		// stride and pointing to the last row.
 		const uint8_t* srcSlice[1] = { buf.data.get() + (h - 1) * w * 4 };

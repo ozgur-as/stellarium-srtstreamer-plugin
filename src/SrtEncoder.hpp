@@ -44,11 +44,12 @@ public:
 	{
 		QString srtUrl     = "srt://127.0.0.1:9000";
 		QString srtMode    = "caller";     // "listener" or "caller"
-		QString encoder    = "libx264";    // codec name
+		QString encoder    = "libx264";    // backend: "libx264", "h264_nvenc", "h264_vaapi"
 		int     width      = 1920;
 		int     height     = 1080;
 		int     fps        = 30;
 		int     bitrateKbps = 6000;
+		bool    use10bit   = true;         // 10-bit HEVC encoding (reduces color banding)
 	};
 
 	explicit SrtEncoder(QObject* parent = nullptr);

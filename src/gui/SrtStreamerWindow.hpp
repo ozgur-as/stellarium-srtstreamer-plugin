@@ -36,6 +36,7 @@ private slots:
 	void onConnectingStateChanged(bool connecting);
 	void onSrtModeChanged(int index);
 	void onEncoderChanged(int index);
+	void onUse10bitToggled(bool checked);
 	void onNativeResolutionToggled(bool checked);
 	void onBitrateChanged(int value);
 	void onFrameRateChanged(int value);
@@ -45,6 +46,7 @@ private slots:
 
 private:
 	void updateUiFromModule();
+	void updateEncoderComboLabels(bool use10bit);
 
 	Ui_SrtStreamerWindow* ui = nullptr;
 	SrtStreamerModule* module = nullptr;

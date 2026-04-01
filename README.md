@@ -19,6 +19,8 @@ Supports hardware encoding (NVENC, VAAPI) and works with any SRT receiver — VL
 - **Direct framebuffer capture** via OpenGL (same hook point as SpoutSender)
 - **SRT streaming** with caller and listener modes
 - **Hardware encoding** — libx264 (CPU), h264_nvenc (NVIDIA), h264_vaapi (Linux)
+- **HEVC 10-bit** — optional higher quality encoding via libx265, hevc_nvenc, hevc_vaapi
+- **Bayer dithering** — reduces color banding in encoded output (SSE2-accelerated)
 - **Async encoding** on a separate thread with double-buffered frame handoff
 - **PBO double-buffering** for async GPU-to-CPU readback
 - **Non-blocking connection** with timeout and cancel support

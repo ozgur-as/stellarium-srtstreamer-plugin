@@ -1,3 +1,8 @@
+1.1.0 [2025-04-01]
+- HEVC 10-bit encoding support (libx265, hevc_nvenc, hevc_vaapi)
+- Bayer ordered dithering to reduce color banding in encoded output
+- SSE2-accelerated dither path on x86-64
+
 1.0.0 [2025-03-31]
 Initial release:
 - OpenGL framebuffer capture with PBO double-buffering

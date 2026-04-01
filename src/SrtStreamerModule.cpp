@@ -235,6 +235,7 @@ void SrtStreamerModule::loadSettings()
 	outputWidth         = conf->value("output_width", 1920).toInt();
 	outputHeight        = conf->value("output_height", 1080).toInt();
 	useNativeResolution = conf->value("use_native_resolution", true).toBool();
+	use10bit            = conf->value("use_10bit", true).toBool();
 	frameRateCap        = conf->value("framerate_cap", 30).toInt();
 	conf->endGroup();
 }
@@ -252,6 +253,7 @@ void SrtStreamerModule::saveSettings()
 	conf->setValue("output_width", outputWidth);
 	conf->setValue("output_height", outputHeight);
 	conf->setValue("use_native_resolution", useNativeResolution);
+	conf->setValue("use_10bit", use10bit);
 	conf->setValue("framerate_cap", frameRateCap);
 	conf->endGroup();
 
@@ -271,6 +273,7 @@ void SrtStreamerModule::startStreaming()
 	cfg.encoder     = encoderName;
 	cfg.bitrateKbps = bitrate;
 	cfg.fps         = frameRateCap;
+	cfg.use10bit    = use10bit;
 
 	if (useNativeResolution)
 	{
@@ -402,6 +405,7 @@ void SrtStreamerModule::setSrtMode(const QString& mode)      { srtMode = mode; }
 void SrtStreamerModule::setEncoderName(const QString& name)   { encoderName = name; }
 void SrtStreamerModule::setBitrate(int kbps)                  { bitrate = kbps; }
 void SrtStreamerModule::setFrameRateCap(int fps)              { frameRateCap = fps; }
+void SrtStreamerModule::setUse10bit(bool enabled)             { use10bit = enabled; }
 void SrtStreamerModule::setUseNativeResolution(bool native)   { useNativeResolution = native; }
 
 void SrtStreamerModule::setOutputResolution(int w, int h)

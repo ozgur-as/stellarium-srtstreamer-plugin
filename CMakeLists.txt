@@ -11,7 +11,7 @@
 #    cmake -DSTELROOT=/path/to/stellarium -DFFMPEG_ROOT=/path/to/ffmpeg ..
 #    Produces libSrtStreamer.so for ~/.stellarium/modules/SrtStreamer/
 
-SET(SRTSTREAMER_VERSION "1.0.0")
+SET(SRTSTREAMER_VERSION "1.1.0")
 
 # Detect whether we're inside Stellarium's build tree
 if(DEFINED STELLARIUM_PLUGINS)

@@ -47,9 +47,10 @@ void SrtStreamerWindow::createDialogContent()
 	ui->comboSrtMode->addItem(q_("Listener"), "listener");
 	ui->comboSrtMode->addItem(q_("Caller"),   "caller");
 
-	ui->comboEncoder->addItem("libx264 (CPU)",     "libx264");
+	ui->comboEncoder->addItem("libx264 (CPU)",      "libx264");
 	ui->comboEncoder->addItem("h264_nvenc (NVIDIA)", "h264_nvenc");
 	ui->comboEncoder->addItem("h264_vaapi (Linux)",  "h264_vaapi");
+	updateEncoderComboLabels(module->getUse10bit());
 
 	// Load current settings into UI
 	updateUiFromModule();
@@ -71,6 +72,8 @@ void SrtStreamerWindow::createDialogContent()
 	        this, &SrtStreamerWindow::onSrtModeChanged);
 	connect(ui->comboEncoder,  QOverload<int>::of(&QComboBox::currentIndexChanged),
 	        this, &SrtStreamerWindow::onEncoderChanged);
+	connect(ui->check10bit,    &QCheckBox::toggled,
+	        this, &SrtStreamerWindow::onUse10bitToggled);
 
 	connect(ui->checkNativeRes, &QCheckBox::toggled,
 	        this, &SrtStreamerWindow::onNativeResolutionToggled);
@@ -102,6 +105,7 @@ void SrtStreamerWindow::updateUiFromModule()
 	int encIdx = ui->comboEncoder->findData(module->getEncoderName());
 	if (encIdx >= 0) ui->comboEncoder->setCurrentIndex(encIdx);
 
+	ui->check10bit->setChecked(module->getUse10bit());
 	ui->spinBitrate->setValue(module->getBitrate());
 	ui->spinFrameRate->setValue(module->getFrameRateCap());
 	ui->checkNativeRes->setChecked(module->getUseNativeResolution());
@@ -148,6 +152,7 @@ void SrtStreamerWindow::onStreamingStateChanged(bool active)
 	ui->editSrtUrl->setEnabled(editable);
 	ui->comboSrtMode->setEnabled(editable);
 	ui->comboEncoder->setEnabled(editable);
+	ui->check10bit->setEnabled(editable);
 	ui->spinBitrate->setEnabled(editable);
 	ui->spinFrameRate->setEnabled(editable);
 	ui->checkNativeRes->setEnabled(editable);
@@ -165,6 +170,42 @@ void SrtStreamerWindow::onEncoderChanged(int index)
 {
 	if (module)
 		module->setEncoderName(ui->comboEncoder->itemData(index).toString());
+}
+
+void SrtStreamerWindow::onUse10bitToggled(bool checked)
+{
+	if (module)
+		module->setUse10bit(checked);
+	updateEncoderComboLabels(checked);
+}
+
+void SrtStreamerWindow::updateEncoderComboLabels(bool use10bit)
+{
+	// Update display names to reflect the actual codec that will be used.
+	// The internal data values (libx264, h264_nvenc, h264_vaapi) stay the
+	// same so settings remain backward-compatible.
+	for (int i = 0; i < ui->comboEncoder->count(); ++i)
+	{
+		QString data = ui->comboEncoder->itemData(i).toString();
+		if (use10bit)
+		{
+			if (data == "libx264")
+				ui->comboEncoder->setItemText(i, "libx265 / HEVC (CPU)");
+			else if (data == "h264_nvenc")
+				ui->comboEncoder->setItemText(i, "hevc_nvenc / HEVC (NVIDIA)");
+			else if (data == "h264_vaapi")
+				ui->comboEncoder->setItemText(i, "hevc_vaapi / HEVC (Linux)");
+		}
+		else
+		{
+			if (data == "libx264")
+				ui->comboEncoder->setItemText(i, "libx264 (CPU)");
+			else if (data == "h264_nvenc")
+				ui->comboEncoder->setItemText(i, "h264_nvenc (NVIDIA)");
+			else if (data == "h264_vaapi")
+				ui->comboEncoder->setItemText(i, "h264_vaapi (Linux)");
+		}
+	}
 }
 
 void SrtStreamerWindow::onNativeResolutionToggled(bool checked)

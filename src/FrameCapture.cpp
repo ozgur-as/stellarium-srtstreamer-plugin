@@ -12,6 +12,14 @@
 #include <QOpenGLContext>
 #include <QDebug>
 
+// SSE2 is always available on x86-64
+#if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64)
+#include <emmintrin.h>
+#define SRT_HAS_SSE2 1
+#else
+#define SRT_HAS_SSE2 0
+#endif
+
 FrameCapture::FrameCapture() = default;
 
 FrameCapture::~FrameCapture()
@@ -93,6 +101,77 @@ void FrameCapture::ensureBufferSize(int width, int height)
 	currentHeight = height;
 }
 
+// 4×4 Bayer ordered dither — breaks up 8-bit quantization banding.
+//
+// Adds +/- 0.5 LSB of spatially-patterned noise to R, G, B channels
+// (alpha untouched).  With float-to-int truncation, negative Bayer
+// entries subtract 1 from the pixel and positive entries leave it
+// unchanged.  This is deterministic (no temporal flicker) and
+// compresses well with video codecs.
+//
+// SSE2 fast path: one saturating subtract per 4 pixels (16 bytes).
+static void applyBayerDither(uint8_t* rgba, int width, int height)
+{
+	// 4×4 Bayer threshold matrix, normalized to [-0.5, +0.5]
+	static const float bayer4x4[4][4] = {
+		{ -0.46875f,  0.03125f, -0.34375f,  0.15625f },
+		{  0.28125f, -0.21875f,  0.40625f, -0.09375f },
+		{ -0.28125f,  0.21875f, -0.40625f,  0.09375f },
+		{  0.46875f, -0.03125f,  0.34375f, -0.15625f }
+	};
+
+#if SRT_HAS_SSE2
+	// Which Bayer entries are negative per row (sign pattern):
+	//   Row 0,2: negative at pixel x%4 = 0, 2
+	//   Row 1,3: negative at pixel x%4 = 1, 3
+	// Masks: subtract 1 from R,G,B at those positions, leave A alone.
+	static const __m128i maskEven = _mm_setr_epi8( // rows 0, 2
+		1,1,1,0,  0,0,0,0,  1,1,1,0,  0,0,0,0);
+	static const __m128i maskOdd  = _mm_setr_epi8( // rows 1, 3
+		0,0,0,0,  1,1,1,0,  0,0,0,0,  1,1,1,0);
+
+	for (int y = 0; y < height; ++y)
+	{
+		uint8_t* row = rgba + static_cast<size_t>(y) * width * 4;
+		const __m128i mask = (y & 1) ? maskOdd : maskEven;
+		const int simdWidth = (width / 4) * 4;
+
+		for (int x = 0; x < simdWidth; x += 4)
+		{
+			__m128i px = _mm_loadu_si128(
+				reinterpret_cast<const __m128i*>(row + x * 4));
+			px = _mm_subs_epu8(px, mask);
+			_mm_storeu_si128(
+				reinterpret_cast<__m128i*>(row + x * 4), px);
+		}
+
+		// Scalar tail (only when width is not a multiple of 4)
+		for (int x = simdWidth; x < width; ++x)
+		{
+			float d = bayer4x4[y & 3][x & 3];
+			uint8_t* px = row + x * 4;
+			px[0] = static_cast<uint8_t>(static_cast<int>(px[0] + d));
+			px[1] = static_cast<uint8_t>(static_cast<int>(px[1] + d));
+			px[2] = static_cast<uint8_t>(static_cast<int>(px[2] + d));
+		}
+	}
+#else
+	// Scalar fallback for non-x86 platforms
+	for (int y = 0; y < height; ++y)
+	{
+		uint8_t* row = rgba + static_cast<size_t>(y) * width * 4;
+		for (int x = 0; x < width; ++x)
+		{
+			float d = bayer4x4[y & 3][x & 3];
+			uint8_t* px = row + x * 4;
+			px[0] = static_cast<uint8_t>(static_cast<int>(px[0] + d));
+			px[1] = static_cast<uint8_t>(static_cast<int>(px[1] + d));
+			px[2] = static_cast<uint8_t>(static_cast<int>(px[2] + d));
+		}
+	}
+#endif
+}
+
 const uint8_t* FrameCapture::capture(GLuint fbo, int width, int height)
 {
 	if (!initialized || width <= 0 || height <= 0)
@@ -131,6 +210,7 @@ const uint8_t* FrameCapture::capture(GLuint fbo, int width, int height)
 
 			firstCapture = false;
 			pboWriteIndex = readSlot;
+			applyBayerDither(cpuBuffer.data(), width, height);
 			return cpuBuffer.data();
 		}
 
@@ -162,5 +242,6 @@ const uint8_t* FrameCapture::capture(GLuint fbo, int width, int height)
 	}
 
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevReadFbo));
+	applyBayerDither(cpuBuffer.data(), width, height);
 	return cpuBuffer.data();
 }

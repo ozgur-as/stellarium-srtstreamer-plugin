@@ -12,7 +12,7 @@
 #define SRTSTREAMERMODULE_HPP
 
 #ifndef SRTSTREAMER_VERSION
-#define SRTSTREAMER_VERSION "1.0.0"
+#define SRTSTREAMER_VERSION "1.1.0"
 #endif
 
 #include "StelModule.hpp"
@@ -69,6 +69,9 @@ public:
 	int getFrameRateCap() const { return frameRateCap; }
 	void setFrameRateCap(int fps);
 
+	bool getUse10bit() const { return use10bit; }
+	void setUse10bit(bool enabled);
+
 	bool getUseNativeResolution() const { return useNativeResolution; }
 	void setUseNativeResolution(bool native);
 
@@ -99,6 +102,7 @@ private:
 	int outputWidth = 0;
 	int outputHeight = 0;
 	bool useNativeResolution = true;
+	bool use10bit = true;   // 10-bit HEVC encoding (reduces banding)
 	int frameRateCap = 30;
 
 	// Components
